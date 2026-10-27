@@ -1,98 +1,82 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import MapView, { Circle, Marker } from 'react-native-maps';
+import * as Location from 'expo-location';
+import { useFocusEffect } from 'expo-router';
+import { getRadiusKm } from '../lib/prefs';
+import { fetchPois, Poi } from '../lib/overpass';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+type Coords = { latitude: number; longitude: number };
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
+export default function MapScreen() {
+  const [here, setHere] = useState<Coords | null>(null);
+  const [radiusKm, setRadius] = useState(1);
+  const [pois, setPois] = useState<Poi[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status !== 'granted') throw new Error('Permiso de ubicación denegado');
+
+          const pos = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+          const r = await getRadiusKm();
+          const found = await fetchPois(coords.latitude, coords.longitude, r);
+
+          if (!cancelled) { setHere(coords); setRadius(r); setPois(found); }
+        } catch (e: any) {
+          if (!cancelled) setError(e.message);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+      return () => { cancelled = true; };   // evita setState si sales de la pantalla a mitad de carga
+    }, [])
   );
-}
 
-export default function HomeScreen() {
+  if (error) return <View style={styles.center}><Text>{error}</Text></View>;
+  if (!here) return <View style={styles.center}><ActivityIndicator size="large" /></View>;
+
+  const delta = (radiusKm / 111) * 2.5;      // ~111 km por grado de latitud
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
+    <View style={{ flex: 1 }}>
+      <MapView
+        key={radiusKm}
+        style={{ flex: 1 }}
+        showsUserLocation
+        initialRegion={{ ...here, latitudeDelta: delta, longitudeDelta: delta }}
+      >
+        <Circle center={here} radius={radiusKm * 1000}
+                strokeColor="rgba(30,100,200,0.6)" fillColor="rgba(30,100,200,0.1)" />
+        {pois.map(p => (
+          <Marker
+            key={p.id}
+            coordinate={{ latitude: p.latitude, longitude: p.longitude }}
+            title={p.name}
+            description={p.kind === 'hospital' ? 'Hospital' : 'Sitio turístico'}
+            pinColor={p.kind === 'hospital' ? 'red' : 'blue'}
           />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+        ))}
+      </MapView>
+      <View style={styles.badge}>
+        <Text>{loading ? 'Buscando…' : `${pois.length} lugares en ${radiusKm} km`}</Text>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  badge: { position: 'absolute', bottom: 24, alignSelf: 'center',
+           backgroundColor: 'white', padding: 10, borderRadius: 8, elevation: 3 },
 });

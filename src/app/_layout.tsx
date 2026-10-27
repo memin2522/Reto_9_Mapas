@@ -1,18 +1,21 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { Link, Stack } from 'expo-router';
+import { Pressable, Text } from 'react-native';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
-
-SplashScreen.preventAutoHideAsync();
-
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+export default function Layout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <Stack>
+      <Stack.Screen
+        name="index"
+        options={{
+          title: 'Puntos cercanos',
+          headerRight: () => (
+            <Link href="/settings" asChild>
+              <Pressable><Text style={{ fontSize: 16 }}>Radio</Text></Pressable>
+            </Link>
+          ),
+        }}
+      />
+      <Stack.Screen name="settings" options={{ title: 'Preferencias' }} />
+    </Stack>
   );
 }
